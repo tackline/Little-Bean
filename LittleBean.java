@@ -3,11 +3,13 @@
 import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
-import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.*;
 import java.nio.charset.*;
 import java.nio.file.*;
 import java.util.*;
 import javax.swing.*;
+import javax.swing.text.*;
+import javax.swing.undo.*;
 import javax.tools.*;
 import java.util.List;
 
@@ -81,9 +83,28 @@ class LittleBean {
     }
     
     private void go() {
-        JTextArea edit = new JTextArea(initialText, 0, 80);
+        Document doc = new PlainDocument();
+        JTextArea edit = new JTextArea(doc, initialText, 0, 80);
         edit.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         edit.setLineWrap(true);
+        UndoManager undo = new UndoManager();
+        doc.addUndoableEditListener(event -> {
+            undo.addEdit(event.getEdit());
+        });
+        action(edit, "undo", KeyEvent.VK_Z, 0, () -> {
+            try {
+                undo.undo();
+            } catch (CannotUndoException ex) {
+                // Shrug.
+            }
+        });
+        action(edit, "redo", KeyEvent.VK_Z, InputEvent.SHIFT_DOWN_MASK, () -> {
+            try {
+                undo.redo();
+            } catch (CannotRedoException ex) {
+                // Shrug.
+            }
+        });
         JScrollPane scroll = new JScrollPane(
             edit,
             ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS,
@@ -97,8 +118,8 @@ class LittleBean {
         frame.add(scroll);
 
         Errors errors = new Errors(frame, edit);
+        action(edit, "showErrors", KeyEvent.VK_E, 0, errors::showErrors);
 
-        action(edit, "showErrors", KeyEvent.VK_E, errors::showErrors);
         // !! I/O and compilation currently block AWT.
         Op save = () -> save(edit.getText());
         Op compile = save.and(() -> {
@@ -106,9 +127,10 @@ class LittleBean {
             return javaToClass(errors::report);
         });
         Op run = compile.and(() -> run(javaArgs.getText()));
-        action(edit, "save", KeyEvent.VK_S, save::run);
-        action(edit, "compile", KeyEvent.VK_D, compile::run);
-        action(edit, "run", KeyEvent.VK_R, run::run);
+
+        action(edit, "save", KeyEvent.VK_S, 0, save::run);
+        action(edit, "compile", KeyEvent.VK_D, 0, compile::run);
+        action(edit, "run", KeyEvent.VK_R, 0, run::run);
 
         frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         frame.pack();
@@ -116,13 +138,28 @@ class LittleBean {
     }
     
     private static void action(
-        JComponent component, String name, int key, Runnable action
+        JComponent component,
+        String name,
+        int key,
+        int eorModifiers,
+        Runnable action
     ) {
         int commandModifier =
             Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
-        InputMap inputs = component.getInputMap();
+        InputMap inputs = component.getInputMap(
+            JComponent.WHEN_IN_FOCUSED_WINDOW
+        );
+        inputs.put(KeyStroke.getKeyStroke(
+            key, commandModifier^eorModifiers
+        ), name);
+
         ActionMap actions = component.getActionMap();
-        inputs.put(KeyStroke.getKeyStroke(key, commandModifier), name);
+        if (actions.get(name) != null) {
+            // Does not appear to check parent action maps.
+            throw new IllegalStateException(
+                "Action \""+name+"\" already registered."
+            );
+        }
         actions.put(name, new AbstractAction() {
             @Override public void actionPerformed(ActionEvent event) {
                 action.run();
@@ -150,21 +187,30 @@ class LittleBean {
         DiagnosticListener<? super JavaFileObject> listener
     ) {
         JavaCompiler javaCompiler = ToolProvider.getSystemJavaCompiler();
-        try (StandardJavaFileManager fileManager = javaCompiler
-                    .getStandardFileManager(null, Locale.UK,
-                                StandardCharsets.UTF_8)) {
-            Iterable<? extends JavaFileObject> units = fileManager
-                        .getJavaFileObjectsFromPaths(List.of(sourcePath));
+        try (StandardJavaFileManager fileManager =
+            javaCompiler.getStandardFileManager(
+                null, Locale.UK, StandardCharsets.UTF_8
+            )
+        ) {
+            Iterable<? extends JavaFileObject> units =
+                fileManager.getJavaFileObjectsFromPaths(List.of(sourcePath));
             Path workingPath = sourcePath.toAbsolutePath().getParent();
             if (workingPath == null) {
                 System.err.println("File is apparently not in a directory");
                 return false;
             }
-            return javaCompiler.getTask(null, fileManager, listener,
-                        List.of("-d", workingPath.toString(), "-Xlint:all",
-                                    "--enable-preview", "-target", "13", "-source",
-                                    "13"),
-                        null, units).call();
+            return javaCompiler.getTask(
+                null,
+                fileManager,
+                listener,
+                List.of(
+                    "-d", workingPath.toString(),
+                    "-Xlint:all",
+                    "--enable-preview", "-target", "13", "-source", "13"
+                ),
+                null,
+                units
+            ).call();
         } catch (IOException exc) {
             exc.printStackTrace();
             return false;
@@ -205,11 +251,13 @@ class LittleBean {
 import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
-import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.*;
 import java.nio.charset.*;
 import java.nio.file.*;
 import java.util.*;
 import javax.swing.*;
+import javax.swing.text.*;
+import javax.swing.undo.*;
 import javax.tools.*;
 import java.util.List;
 import javax.swing.Timer;
@@ -219,7 +267,7 @@ class Code {
         System.err.println("Hi");
     }
 }
-     """;
+    """;
 }
 
 /** Chainable operation that may fail. */
@@ -241,9 +289,11 @@ class Errors {
         this.edit = edit;
         this.errorPane = new PaddedErrors();
         this.errorWindow = new JWindow(frame);
-        errorWindow.add(new JScrollPane(errorPane,
-                    ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
-                    ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER));
+        errorWindow.add(new JScrollPane(
+            errorPane,
+            ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED,
+            ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+        ));
         errorWindow.setSize(200, 300);
         // Error window visibility tracks frame.
         frame.addWindowListener(new WindowAdapter() {
@@ -319,8 +369,9 @@ class Errors {
         component.setEditable(false);
         component.addMouseListener(new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent event) {
-                edit.setSelectionStart((int) diagnostic.getStartPosition());
-                edit.setSelectionEnd((int) diagnostic.getEndPosition());
+                edit.setSelectionStart((int)diagnostic.getStartPosition());
+                edit.setSelectionEnd(  (int)diagnostic.getEndPosition()  );
+                edit.grabFocus();
             }
         });
         GridBagConstraints errorConstraints = new GridBagConstraints(
