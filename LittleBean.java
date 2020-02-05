@@ -91,20 +91,25 @@ class LittleBean {
         doc.addUndoableEditListener(event -> {
             undo.addEdit(event.getEdit());
         });
-        action(edit, "undo", KeyEvent.VK_Z, 0, () -> {
-            try {
-                undo.undo();
-            } catch (CannotUndoException ex) {
-                // Shrug.
+        register(edit, action(
+            "Undo", KeyEvent.VK_Z, 0, () -> {
+                try {
+                    undo.undo();
+                } catch (CannotUndoException ex) {
+                    // Shrug.
+                }
             }
-        });
-        action(edit, "redo", KeyEvent.VK_Z, InputEvent.SHIFT_DOWN_MASK, () -> {
-            try {
-                undo.redo();
-            } catch (CannotRedoException ex) {
-                // Shrug.
+        ));
+        int SHIFT = InputEvent.SHIFT_DOWN_MASK;
+        register(edit, action(
+            "Redo", KeyEvent.VK_Z, SHIFT, () -> {
+                try {
+                    undo.redo();
+                } catch (CannotRedoException ex) {
+                    // Shrug.
+                }
             }
-        });
+        ));
         JScrollPane scroll = new JScrollPane(
             edit,
             ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS,
@@ -117,8 +122,25 @@ class LittleBean {
         frame.add(javaArgs, BorderLayout.NORTH);
         frame.add(scroll);
 
+        JPopupMenu menu = new JPopupMenu();
+        edit.addMouseListener(new MouseAdapter() {
+            @Override public void mousePressed(MouseEvent event) {
+                poup(event);
+            }
+            @Override public void mouseReleased(MouseEvent event) {
+                poup(event);
+            }
+            private void poup(MouseEvent event) {
+                if (event.isPopupTrigger()) {
+                    menu.show(edit, event.getX(), event.getY());
+                }
+            }
+        });
+
         Errors errors = new Errors(frame, edit);
-        action(edit, "showErrors", KeyEvent.VK_E, 0, errors::showErrors);
+        register(edit, menu, action(
+            "Errors", KeyEvent.VK_E, 0, errors::showErrors
+        ));
 
         // !! I/O and compilation currently block AWT.
         Op save = () -> save(edit.getText());
@@ -128,30 +150,61 @@ class LittleBean {
         });
         Op run = compile.and(() -> run(javaArgs.getText()));
 
-        action(edit, "save", KeyEvent.VK_S, 0, save::run);
-        action(edit, "compile", KeyEvent.VK_D, 0, compile::run);
-        action(edit, "run", KeyEvent.VK_R, 0, run::run);
+        register(edit, menu, action(
+            "Run", KeyEvent.VK_R, 0, run::run
+        ));
+        register(edit, menu, action(
+            "Compile", KeyEvent.VK_D, 0, compile::run
+        ));
+        register(edit, menu, action(
+            "Save", KeyEvent.VK_S, 0, save::run
+        ));
 
         frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         frame.pack();
         frame.setVisible(true);
     }
     
-    private static void action(
-        JComponent component,
+    private static Action action(
         String name,
         int key,
         int eorModifiers,
-        Runnable action
+        Runnable task
     ) {
         int commandModifier =
             Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        Action action = new AbstractAction(name) {
+            @Override public void actionPerformed(ActionEvent event) {
+                task.run();
+            }
+        };
+        action.putValue(Action.ACCELERATOR_KEY, KeyStroke.getKeyStroke(
+            key, commandModifier^eorModifiers
+        ));
+        return action;
+    }
+    
+    private static void register(
+        JComponent component,
+        JPopupMenu menu,
+        Action action
+    ) {
+       register(component, action);
+       menu.add(action);
+    }
+    private static void register(
+        JComponent component,
+        Action action
+    ) {
+        String name = (String)action.getValue(Action.NAME);
+
         InputMap inputs = component.getInputMap(
             JComponent.WHEN_IN_FOCUSED_WINDOW
         );
-        inputs.put(KeyStroke.getKeyStroke(
-            key, commandModifier^eorModifiers
-        ), name);
+        inputs.put(
+           (KeyStroke)action.getValue(Action.ACTION_COMMAND_KEY),
+           name
+        );
 
         ActionMap actions = component.getActionMap();
         if (actions.get(name) != null) {
@@ -160,11 +213,7 @@ class LittleBean {
                 "Action \""+name+"\" already registered."
             );
         }
-        actions.put(name, new AbstractAction() {
-            @Override public void actionPerformed(ActionEvent event) {
-                action.run();
-            }
-        });
+        actions.put(name, action);
     }
     
     private boolean save(String source) {
