@@ -21,3 +21,5 @@ Commands:
  * *default-menu-shortcut-key* **R** - Save & Compile & Run
 
 The text field at the top is for command line arguments.
+
+Added features: Undo. Popup menu.
