@@ -81,10 +81,18 @@ class LittleBean {
             name.substring(0, name.length() - dotExt.length()) :
             name;
     }
-    
+
     private void go() {
+        int commandModifier =
+            Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
         Document doc = new PlainDocument();
         JTextArea edit = new JTextArea(doc, initialText, 0, 80);
+        register(edit, edit.getInputMap(), action(
+            "New line", KeyEvent.VK_ENTER, 0, () -> {
+                newLine(doc, edit.getCaretPosition());
+            }
+        ));
+
         edit.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         edit.setLineWrap(true);
         UndoManager undo = new UndoManager();
@@ -92,20 +100,20 @@ class LittleBean {
             undo.addEdit(event.getEdit());
         });
         register(edit, action(
-            "Undo", KeyEvent.VK_Z, 0, () -> {
+            "Undo", KeyEvent.VK_Z, commandModifier, () -> {
                 try {
                     undo.undo();
-                } catch (CannotUndoException ex) {
+                } catch (CannotUndoException exc) {
                     // Shrug.
                 }
             }
         ));
         int SHIFT = InputEvent.SHIFT_DOWN_MASK;
         register(edit, action(
-            "Redo", KeyEvent.VK_Z, SHIFT, () -> {
+            "Redo", KeyEvent.VK_Z, commandModifier|SHIFT, () -> {
                 try {
                     undo.redo();
-                } catch (CannotRedoException ex) {
+                } catch (CannotRedoException exc) {
                     // Shrug.
                 }
             }
@@ -139,7 +147,7 @@ class LittleBean {
 
         Errors errors = new Errors(frame, edit);
         register(edit, menu, action(
-            "Errors", KeyEvent.VK_E, 0, errors::showErrors
+            "Errors", KeyEvent.VK_E, commandModifier, errors::showErrors
         ));
 
         // !! I/O and compilation currently block AWT.
@@ -151,13 +159,13 @@ class LittleBean {
         Op run = compile.and(() -> run(javaArgs.getText()));
 
         register(edit, menu, action(
-            "Run", KeyEvent.VK_R, 0, run::run
+            "Run", KeyEvent.VK_R, commandModifier, run::run
         ));
         register(edit, menu, action(
-            "Compile", KeyEvent.VK_D, 0, compile::run
+            "Compile", KeyEvent.VK_D, commandModifier, compile::run
         ));
         register(edit, menu, action(
-            "Save", KeyEvent.VK_S, 0, save::run
+            "Save", KeyEvent.VK_S, commandModifier, save::run
         ));
 
         frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
@@ -168,18 +176,16 @@ class LittleBean {
     private static Action action(
         String name,
         int key,
-        int eorModifiers,
+        int modifiers,
         Runnable task
     ) {
-        int commandModifier =
-            Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
         Action action = new AbstractAction(name) {
             @Override public void actionPerformed(ActionEvent event) {
                 task.run();
             }
         };
         action.putValue(Action.ACCELERATOR_KEY, KeyStroke.getKeyStroke(
-            key, commandModifier^eorModifiers
+            key, modifiers
         ));
         return action;
     }
@@ -192,19 +198,28 @@ class LittleBean {
        register(component, action);
        menu.add(action);
     }
+
     private static void register(
         JComponent component,
         Action action
     ) {
-        String name = (String)action.getValue(Action.NAME);
-
         InputMap inputs = component.getInputMap(
-            JComponent.WHEN_IN_FOCUSED_WINDOW
+           JComponent.WHEN_IN_FOCUSED_WINDOW
         );
-        inputs.put(
-           (KeyStroke)action.getValue(Action.ACTION_COMMAND_KEY),
-           name
-        );
+        register(component, inputs, action);
+    }
+
+    private static void register(
+        JComponent component,
+        InputMap inputs,
+        Action action
+    ) {
+        String name = (String)
+            action.getValue(Action.NAME);
+        KeyStroke accelerator = (KeyStroke)
+            action.getValue(Action.ACCELERATOR_KEY);
+
+        inputs.put(accelerator, name);
 
         ActionMap actions = component.getActionMap();
         if (actions.get(name) != null) {
@@ -214,6 +229,98 @@ class LittleBean {
             );
         }
         actions.put(name, action);
+    }
+    
+    private void newLine(Document doc, int pos) {
+        try {
+            doc.insertString(
+                pos, "\n"+requiredIndent(new CharMatcher(
+                    doc.getText(0, pos).toCharArray()
+                )), null
+            );
+        } catch (BadLocationException exc) {
+            throw new RuntimeException(exc);
+        }
+    }
+
+    private String requiredIndent(CharMatcher in) {
+        int indent = 0;
+        //boolean comment = false;
+        outer: while (in.hasNext()) {
+            // Deal with leading whitespace, skipping blank lines.
+            int thisIndent;
+            do {
+                thisIndent = 0;
+                while (in.match(' ')) {
+                    ++thisIndent;
+                }
+            } while (in.match('\n'));
+
+            boolean inCode = false;
+            int open = 0;
+            while (in.hasNext() && !in.match('\n')) {
+                if (in.match('(') || in.match('[') || in.match('{')) {
+                    ++open;
+                    inCode = true;
+                } else if (in.match(')') || in.match(']')) {
+                    --open;
+                    inCode = true;
+                } else if (in.match('}')) {
+                    --open;
+                    inCode = false;
+                } else if (in.match('/')) {
+                    if (in.match('*')) {
+                        // Block comment - TODO
+                    } else if (in.match('/')) {
+                        // Winged comment - skip line. 
+                        while (in.matchExcept('\n')) {
+                            ;
+                        }
+                    } else {
+                        inCode = true;
+                    }
+                } else if (in.match('"')) {
+                    skipQuoted(in, '"');
+                    inCode = true;
+                } else if (in.match('\'')) {
+                    skipQuoted(in, '\'');
+                    inCode = true;
+                } else if (in.match(';')) {
+                    // Still inCode in for (;;) (also try (;) and lambdas)
+                    inCode = open != 0;
+                } else {
+                    in.next();
+                    inCode = true;
+                }
+            }
+            // TODO: subsequent split lines should not further indent.
+            indent =
+                open > 0 ? thisIndent + 4 :
+                 // TODO: )]} should actively unindent
+                //open < 0 ? thisIndent - 4 :
+                inCode   ? thisIndent + 8 :
+                           thisIndent;
+        }
+        indent = Math.max(0, indent);
+        // Round half indents up.
+        indent = (indent+2)/4*4;
+        return " ".repeat(indent);
+    }
+
+    private void skipQuoted(CharMatcher in, char close) {
+        // Ignore multiline comments.
+        for (;;) {
+            if (in.match('\\')) {
+                // Skip escaped, unless new line.
+                in.matchExcept('\n');
+            } else if (in.match(close)) {
+                break;
+            } else if (in.matchExcept('\n')) {
+                // Ignore.
+            } else {
+                break;
+            }
+        }
     }
     
     private boolean save(String source) {
@@ -416,13 +523,7 @@ class Errors {
         );
         component.setLineWrap(true);
         component.setEditable(false);
-        component.addMouseListener(new MouseAdapter() {
-            @Override public void mouseClicked(MouseEvent event) {
-                edit.setSelectionStart((int)diagnostic.getStartPosition());
-                edit.setSelectionEnd(  (int)diagnostic.getEndPosition()  );
-                edit.grabFocus();
-            }
-        });
+        component.addMouseListener(reportMouseListener(diagnostic));
         GridBagConstraints errorConstraints = new GridBagConstraints(
             0, 0, 1, 1,
             1.0, 0.0,
@@ -438,6 +539,28 @@ class Errors {
             isErrorsVisible = true;
             errorWindow.setVisible(isErrorsVisible);
             errorWindow.toFront();
+        }
+    }
+    private MouseListener reportMouseListener(
+        Diagnostic<? extends JavaFileObject> diagnostic
+    ) {
+        Document editDoc = edit.getDocument();
+        try {
+            Position start = editDoc.createPosition((int)
+                diagnostic.getStartPosition()
+            );
+            Position end   = editDoc.createPosition((int)
+                diagnostic.getEndPosition()
+            );
+            return new MouseAdapter() {
+                @Override public void mouseClicked(MouseEvent event) {
+                    edit.setSelectionStart(start.getOffset());
+                    edit.setSelectionEnd(  end  .getOffset());
+                    edit.grabFocus();
+                }
+            };
+        } catch (BadLocationException exc) {
+            throw new RuntimeException(exc);
         }
     }
 }
@@ -475,5 +598,34 @@ class PaddedErrors extends JPanel implements Scrollable {
 
     public boolean getScrollableTracksViewportHeight() {
         return false;
+    }
+}
+class CharMatcher {
+    private final char[] cs;
+    private int off;
+    CharMatcher(char[] cs) {
+        this.cs = cs;
+    } 
+    boolean hasNext() {
+        return off != cs.length;
+    }
+    char next() {
+        return cs[off++];
+    }
+    boolean match(char c) {
+        if (hasNext() && cs[off] == c) {
+            ++off;
+            return true;
+        } else {
+            return false;
+        }
+    }
+    boolean matchExcept(char c) {
+        if (hasNext() && cs[off] != c) {
+            ++off;
+            return true;
+        } else {
+            return false;
+        }
     }
 }

@@ -22,4 +22,4 @@ Commands:
 
 The text field at the top is for command line arguments.
 
-Added features: Undo. Popup menu.
+Added features: Undo, popup menu, indent-on-return (not comprehensive).
