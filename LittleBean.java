@@ -33,7 +33,7 @@ class LittleBean {
         String leaf = raw.getFileName().toString();
         String className;
         if (isJavaName(leaf)) {
-            className = baseName(leaf);;
+            className = baseName(leaf);
             this.sourcePath = raw.resolveSibling(className+".java");
         } else {
             className = "Code";
@@ -254,15 +254,11 @@ class LittleBean {
     private String requiredIndent(CharMatcher in) {
         int indent = 0;
         //boolean comment = false;
+        boolean wasInCode = false;
+        
         outer: while (in.hasNext()) {
             // Deal with leading whitespace, skipping blank lines.
-            int thisIndent;
-            do {
-                thisIndent = 0;
-                while (in.match(' ')) {
-                    ++thisIndent;
-                }
-            } while (in.match('\n'));
+            int thisIndent = findIndent(in);
 
             boolean inCode = false;
             int open = 0;
@@ -293,7 +289,7 @@ class LittleBean {
                 } else if (in.match('\'')) {
                     skipQuoted(in, '\'');
                     inCode = true;
-                } else if (in.match(';')) {
+                } else if (in.match(';') || in.match(',')) {
                     // Still inCode in for (;;) (also try (;) and lambdas)
                     inCode = open != 0;
                 } else {
@@ -301,18 +297,30 @@ class LittleBean {
                     inCode = true;
                 }
             }
-            // TODO: subsequent split lines should not further indent.
-            indent =
-                open > 0 ? thisIndent + 4 :
-                 // TODO: )]} should actively unindent
-                //open < 0 ? thisIndent - 4 :
-                inCode   ? thisIndent + 8 :
-                           thisIndent;
+            if (open > 0) {
+                indent =  thisIndent + 4;
+                wasInCode = false;
+            } else if (inCode == wasInCode) {
+                indent = thisIndent;
+            } else {
+                indent = inCode ? thisIndent + 8 : thisIndent - 8;
+                wasInCode = inCode;
+            }
         }
         indent = Math.max(0, indent);
         // Round half indents up.
         indent = (indent+2)/4*4;
         return " ".repeat(indent);
+    }
+    private int findIndent(CharMatcher in) {
+        int thisIndent;
+        do {
+            thisIndent = 0;
+            while (in.match(' ')) {
+                ++thisIndent;
+            }
+        } while (in.match('\n'));
+        return thisIndent;
     }
 
     private void skipQuoted(CharMatcher in, char close) {
