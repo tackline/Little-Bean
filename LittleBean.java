@@ -31,11 +31,13 @@ class LittleBean {
     private LittleBean(String fileName) {
         Path raw = Path.of(fileName);
         String leaf = raw.getFileName().toString();
+        String className;
         if (isJavaName(leaf)) {
-            leaf = baseName(leaf) + ".java";
-            this.sourcePath = raw.resolveSibling(leaf);
+            className = baseName(leaf);;
+            this.sourcePath = raw.resolveSibling(className+".java");
         } else {
-            this.sourcePath = raw.resolve("Code.java");
+            className = "Code";
+            this.sourcePath = raw.resolve(className+".java");
         }
         StringBuilder buff = new StringBuilder();
         String initialText;
@@ -52,7 +54,10 @@ class LittleBean {
         } catch (NoSuchFileException exc) {
             // Not FileNotFoundException.
             // Okay.
-            initialText = helloTaciturnWorld;
+            initialText = String.format(
+                classTemplate,
+                className
+            );
         } catch (IOException exc) {
             System.err.println("Error reading file: " + exc);
             exc.printStackTrace();
@@ -72,7 +77,10 @@ class LittleBean {
     }
     
     private static String baseName(String leaf) {
-        return removeExt(removeExt(leaf, "java"), "class");
+        // Remove .java extends,
+        //   but also for convenience .class
+        //   and auto-complete can get as far as . (if no inner classes).
+        return removeExt(removeExt(removeExt(leaf, ""), "java"), "class");
     }
     
     private static String removeExt(String name, String ext) {
@@ -403,7 +411,7 @@ class LittleBean {
         return List.of(str.split(" "));
     }
 
-    private static final String helloTaciturnWorld = """
+    private static final String classTemplate = """
 import java.awt.*;
 import java.awt.event.*;
 import java.io.*;
@@ -418,9 +426,9 @@ import javax.tools.*;
 import java.util.List;
 import javax.swing.Timer;
 
-class Code {
+class %1$s {
     public static void main(String[] args) throws Throwable {
-        System.err.println("Hi");
+        System.err.println("%1$s");
     }
 }
     """;
