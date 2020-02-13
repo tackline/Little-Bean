@@ -8,6 +8,7 @@ import java.nio.charset.*;
 import java.nio.file.*;
 import java.util.*;
 import javax.swing.*;
+import javax.swing.event.*;
 import javax.swing.text.*;
 import javax.swing.undo.*;
 import javax.tools.*;
@@ -93,17 +94,32 @@ class LittleBean {
     private void go() {
         int commandModifier =
             Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+    
         Document doc = new PlainDocument();
         JTextArea edit = new JTextArea(doc, initialText, 0, 80);
-        register(edit, edit.getInputMap(), action(
+        
+        InputMap inputs = edit.getInputMap();
+        register(edit, inputs, action(
             "New line", KeyEvent.VK_ENTER, 0, () -> {
                 newLine(doc, edit.getCaretPosition());
             }
         ));
+               
+        edit.addKeyListener(new KeyAdapter() {
+            @Override public void keyTyped​(KeyEvent event) {
+                char c = event.getKeyChar();
+                if ("}])".indexOf(c) != -1) {
+                    typeClose(doc, edit.getCaretPosition(), c);
+                    event.consume();
+                }
+            }
+        });
 
         edit.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         edit.setLineWrap(true);
+        
         UndoManager undo = new UndoManager();
+        // TODO: Compound undo.
         doc.addUndoableEditListener(event -> {
             undo.addEdit(event.getEdit());
         });
@@ -241,17 +257,37 @@ class LittleBean {
     
     private void newLine(Document doc, int pos) {
         try {
-            doc.insertString(
-                pos, "\n"+requiredIndent(new CharMatcher(
-                    doc.getText(0, pos).toCharArray()
-                )), null
-            );
+            char[] cs = doc.getText(0, pos).toCharArray();
+            int required = requiredIndent(new CharMatcher(cs));
+            doc.insertString(pos, "\n"+" ".repeat(required), null);
         } catch (BadLocationException exc) {
             throw new RuntimeException(exc);
         }
     }
 
-    private String requiredIndent(CharMatcher in) {
+    private void typeClose(Document doc, int pos, char close) {
+        try {
+            char[] cs = doc.getText(0, pos).toCharArray();
+            int remove = 0;
+            int newLine = findPreviousNewLine(cs, pos);
+            if (newLine != -1) {
+                int required = Math.max(
+                    0, requiredIndent(new CharMatcher(cs, 0, newLine)) - 4
+                );
+                int startOfLine = newLine+1;
+                int actual = pos-startOfLine;
+                remove = Math.max(0, actual-required);
+                if (remove != 0) {
+                    doc.remove(pos-remove, remove);
+                }
+            }
+            doc.insertString(pos-remove, Character.toString(close), null);
+        } catch (BadLocationException exc) {
+            throw new RuntimeException(exc);
+        }
+    }
+
+    private int requiredIndent(CharMatcher in) {
         int indent = 0;
         //boolean comment = false;
         boolean wasInCode = false;
@@ -310,8 +346,9 @@ class LittleBean {
         indent = Math.max(0, indent);
         // Round half indents up.
         indent = (indent+2)/4*4;
-        return " ".repeat(indent);
+        return indent;
     }
+    
     private int findIndent(CharMatcher in) {
         int thisIndent;
         do {
@@ -321,6 +358,14 @@ class LittleBean {
             }
         } while (in.match('\n'));
         return thisIndent;
+    }
+    
+    private int findPreviousNewLine(char[] cs, int off) {
+        --off;
+        while (off >= 0 && cs[off] == ' ') {
+            --off;
+        }
+        return off >= 0 && cs[off] == '\n' ? off : -1;
     }
 
     private void skipQuoted(CharMatcher in, char close) {
@@ -428,6 +473,7 @@ import java.nio.charset.*;
 import java.nio.file.*;
 import java.util.*;
 import javax.swing.*;
+import javax.swing.event.*;
 import javax.swing.text.*;
 import javax.swing.undo.*;
 import javax.tools.*;
@@ -619,11 +665,17 @@ class PaddedErrors extends JPanel implements Scrollable {
 class CharMatcher {
     private final char[] cs;
     private int off;
+    private int len;
     CharMatcher(char[] cs) {
+        this(cs, 0, cs.length);
+    }
+    CharMatcher(char[] cs, int off, int len) {
         this.cs = cs;
+        this.off = off;
+        this.len = len;
     } 
     boolean hasNext() {
-        return off != cs.length;
+        return off != len;
     }
     char next() {
         return cs[off++];
