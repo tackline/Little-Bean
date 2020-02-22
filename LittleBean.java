@@ -296,8 +296,20 @@ class LittleBean {
             // Deal with leading whitespace, skipping blank lines.
             int thisIndent = findIndent(in);
 
+            final boolean startsOpen;
             boolean inCode = false;
             int open = 0;
+            if (in.match(')') || in.match(']')) {
+                startsOpen = true;
+                --open;
+                inCode = true;
+            } else if (in.match('}')) {
+                startsOpen = true;
+                --open;
+                inCode = false;
+            } else {
+                startsOpen = false;
+            }
             while (in.hasNext() && !in.match('\n')) {
                 if (in.match('(') || in.match('[') || in.match('{')) {
                     ++open;
@@ -333,7 +345,7 @@ class LittleBean {
                     inCode = true;
                 }
             }
-            if (open > 0) {
+            if (open > 0 || (open == 0 && startsOpen)) {
                 indent =  thisIndent + 4;
                 wasInCode = false;
             } else if (inCode == wasInCode) {
@@ -472,6 +484,10 @@ import java.lang.reflect.*;
 import java.nio.charset.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
+import java.util.function.*;
+import java.util.stream.*;
 import javax.swing.*;
 import javax.swing.event.*;
 import javax.swing.text.*;
