@@ -435,7 +435,8 @@ class LittleBean {
                 List.of(
                     "-d", workingPath.toString(),
                     "-Xlint:all",
-                    "--enable-preview", "-target", "14", "-source", "14"
+                    "--enable-preview",
+                    "--release", "14"
                 ),
                 null,
                 units
