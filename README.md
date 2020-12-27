@@ -4,7 +4,7 @@ Trivial "IDE" for single-file programs for use from command line.
 Because I don't want wizzards and much getting in my way, and `vi Code.java && javac Code.java && java Code` is too much.
 Testing is not supported.
 If you don't like the hardcode configuration it, fork and do it yourself.
-Requires JDK13 with `--enable-preview -source 13 -target 13`.
+Requires JDK14 with `--enable-preview -source 14 -target 14`.
 The name refers to ["Little Grape"](https://www.youtube.com/watch?v=omAv1X6NOKg) AND NOTHING ELSE.
 
 I suggest an alias.
